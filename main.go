@@ -39,10 +39,6 @@ type config struct { // nolint
 	healthCheckPath  string // HEALTHCHECK_PATH
 }
 
-type symlink struct {
-	URL string
-}
-
 var (
 	version string
 	date    string
@@ -217,15 +213,6 @@ func header(r *http.Request, key string) (string, bool) {
 	return "", false
 }
 
-func splitCsvLine(data string) []string {
-	splitted := strings.SplitN(data, ",", -1)
-	parsed := make([]string, len(splitted))
-	for i, val := range splitted {
-		parsed[i] = strings.TrimSpace(val)
-	}
-	return parsed
-}
-
 func awss3(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	rangeHeader := r.Header.Get("Range")
@@ -255,7 +242,6 @@ func awss3(w http.ResponseWriter, r *http.Request) {
 }
 
 func setHeadersFromAwsResponse(w http.ResponseWriter, obj *s3.GetObjectOutput) {
-
 	// Cache-Control
 	if len(c.httpCacheControl) > 0 {
 		setStrHeader(w, "Cache-Control", &c.httpCacheControl)
@@ -285,7 +271,6 @@ func setHeadersFromAwsResponse(w http.ResponseWriter, obj *s3.GetObjectOutput) {
 }
 
 func determineHTTPStatus(obj *s3.GetObjectOutput) int {
-
 	httpStatus := http.StatusOK
 
 	contentRangeIsGiven := obj.ContentRange != nil && len(*obj.ContentRange) > 0
