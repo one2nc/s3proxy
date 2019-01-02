@@ -1,10 +1,10 @@
 SHELL = bash
-SERVER_REPO := "tsocial/aws-s3-proxy"
+SERVER_REPO := "tsocial/s3-proxy"
 
-dev_up:
+docker_up:
 	docker-compose -f docker-compose.yaml up -d
 
-dev_down:
+docker_down:
 	docker-compose -f docker-compose.yaml down
 
 build_image:

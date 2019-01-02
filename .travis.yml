@@ -2,9 +2,9 @@ services:
   - docker
 
 script:
-  - make build
-  - make dev_up
-  - curl -sL -w "%{http_code}\\n" "http://localhost:4545/health" -o /dev/null | grep 200 && exit 1
+  - make build_image
+  - make docker_up
+  - curl -sL -w "%{http_code}\\n" "http://localhost:4545/health" -o /dev/null --fail --show-error
 
 deploy:
   - provider: script

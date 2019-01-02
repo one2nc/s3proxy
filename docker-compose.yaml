@@ -3,7 +3,7 @@ version: "3"
 services:
   proxy:
     build: .
-    image: tsocial/aws-s3-proxy
+    image: tsocial/s3-proxy
     command: ./s3proxy
     ports:
       - 4545:80
