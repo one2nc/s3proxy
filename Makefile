@@ -1,5 +1,5 @@
 SHELL = bash
-SERVER_REPO := "tsocial/s3-proxy"
+SERVER_REPO := "tsl8/s3proxy"
 
 docker_up:
 	docker-compose -f docker-compose.yaml up -d
