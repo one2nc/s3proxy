@@ -1,0 +1,13 @@
+services:
+  - docker
+
+script:
+  - make build
+  - make dev_up
+  - curl -sL -w "%{http_code}\\n" "http://localhost:4545/health" -o /dev/null | grep 200 && exit 1
+
+deploy:
+  - provider: script
+    script: make upload_image
+    on:
+      branch: master
