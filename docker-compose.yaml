@@ -1,0 +1,27 @@
+version: "3"
+
+services:
+  proxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: tsl8/s3proxy:latest
+    command: /go/bin/s3proxy
+    ports:
+      - 8080:80
+    environment:
+      - AWS_REGION=ap-southeast-1
+      - AWS_ACCESS_KEY_ID=1
+      - AWS_SECRET_ACCESS_KEY=1
+      - AWS_S3_BUCKET=avay.vn
+      - AWS_S3_KEY_PREFIX
+      - HTTP_CACHE_CONTROL
+      - HTTP_EXPIRES
+      - BASIC_AUTH_USER
+      - BASIC_AUTH_PASS
+      - CORS_ALLOW_ORIGIN
+      - CORS_ALLOW_METHODS
+      - CORS_ALLOW_HEADERS
+      - CORS_MAX_AGE
+      - ACCESS_LOG=true
+      - HEALTHCHECK_PATH=/health
