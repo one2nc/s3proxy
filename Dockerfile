@@ -11,6 +11,7 @@ RUN go get -d -v .
 # Build the binary.
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o /go/bin/s3proxy
 
-FROM scratch
+FROM alpine
+RUN apk add --no-cache ca-certificates
 # Copy our static executable.
 COPY --from=builder /go/bin/s3proxy .
