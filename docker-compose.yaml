@@ -6,7 +6,7 @@ services:
     image: tsocial/s3-proxy
     command: ./s3proxy
     ports:
-      - 4545:80
+      - 24545:80
     environment:
       - AWS_REGION=ap-southeast-1
       - AWS_ACCESS_KEY_ID=1
