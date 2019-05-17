@@ -12,10 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"bytes"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/mux"
+	ts2fa "github.com/tsocial/ts2fa/auth"
 )
 
 type config struct { // nolint
@@ -37,6 +42,8 @@ type config struct { // nolint
 	corsAllowHeaders string // CORS_ALLOW_HEADERS
 	corsMaxAge       int64  // CORS_MAX_AGE
 	healthCheckPath  string // HEALTHCHECK_PATH
+	jwtTokenExpiry   string
+	jwtSecret        string
 }
 
 var (
@@ -48,20 +55,24 @@ var (
 func main() {
 	c = configFromEnvironmentVariables()
 
-	http.Handle("/", wrapper(awss3))
+	m := mux.NewRouter()
+	m.Handle("/", wrapper(awss3)).Methods(http.MethodGet)
 
-	http.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
+	m.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
 		if len(version) > 0 && len(date) > 0 {
 			fmt.Fprintf(w, "version: %s (built at %s)\n", version, date)
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-	})
+	}).Methods(http.MethodGet)
+
+	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
+	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
 	log.Printf("[service] listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(addr, m))
 }
 
 func configFromEnvironmentVariables() *config {
@@ -104,6 +115,14 @@ func configFromEnvironmentVariables() *config {
 	if i, err := strconv.ParseInt(os.Getenv("CORS_MAX_AGE"), 10, 64); err == nil {
 		corsMaxAge = i
 	}
+	jwt_token_expiry := os.Getenv("JWT_TOKEN_EXPIRY")
+	if len(jwt_token_expiry) == 0 {
+		jwt_token_expiry = "60"
+	}
+	jwt_secret := os.Getenv("JWT_SECRET")
+	if len(jwt_secret) == 0 {
+		jwt_secret = "secret"
+	}
 	conf := &config{
 		awsRegion:        region,
 		awsAPIEndpoint:   endpoint,
@@ -123,6 +142,8 @@ func configFromEnvironmentVariables() *config {
 		corsAllowHeaders: os.Getenv("CORS_ALLOW_HEADERS"),
 		corsMaxAge:       corsMaxAge,
 		healthCheckPath:  os.Getenv("HEALTHCHECK_PATH"),
+		jwtTokenExpiry:   jwt_token_expiry,
+		jwtSecret:        jwt_secret,
 	}
 	// Proxy
 	log.Printf("[config] Proxy to %v", conf.s3Bucket)
@@ -136,6 +157,7 @@ func configFromEnvironmentVariables() *config {
 	if (len(conf.corsAllowOrigin) > 0) && (conf.corsMaxAge > 0) {
 		log.Printf("[config] CORS enabled: %s", conf.corsAllowOrigin)
 	}
+
 	return conf
 }
 
@@ -155,6 +177,73 @@ func (r *custom) Write(b []byte) (int, error) {
 func (r *custom) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 	r.status = status
+}
+
+func uploadHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b bytes.Buffer
+		if _, err := r.Body.Read(b.Bytes()); err != nil {
+			http.Error(w, "error processing request", http.StatusBadRequest)
+		}
+
+		t := r.Header.Get("X-Auth-Token")
+
+		token, err := jwt.Parse(t, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+			}
+
+			return []byte(c.jwtSecret), nil
+		})
+		if err != nil {
+			http.Error(w, "Not Authorized", http.StatusUnauthorized)
+		}
+
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			if claims["expiry"].(int64) > time.Now().Unix() {
+				if err := s3Upload(claims["username"].(string), c.s3Bucket, b.Bytes()); err != nil {
+					http.Error(w, "error uploading file", http.StatusBadRequest)
+				}
+			}
+		}
+
+		http.Error(w, "Not Authorized", http.StatusUnauthorized)
+	}
+}
+
+func authHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			http.Error(w, "Authorization not passed", http.StatusUnauthorized)
+		}
+
+		token, err := createToken(username, password, time.Now())
+		if err != nil {
+			http.Error(w, "Error while validating", http.StatusBadRequest)
+		}
+
+		if _, err := w.Write([]byte(token)); err != nil {
+			http.Error(w, "Error while sending response", http.StatusBadRequest)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func createToken(username, password string, now time.Time) (string, error) {
+	i, err := strconv.ParseInt(c.jwtTokenExpiry, 10, 64)
+	if err != nil {
+		return "", nil
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"username": username,
+		"password": password,
+		"expiry":   now.Add(time.Second * time.Duration(i)).Unix(),
+	})
+
+	return t.SignedString([]byte(c.jwtSecret))
 }
 
 func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
@@ -319,6 +408,10 @@ func s3get(backet, key, rangeHeader string) (*s3.GetObjectOutput, error) {
 		Range:  rangeHeaderAwsString,
 	}
 	return s3.New(awsSession()).GetObject(req)
+}
+
+func s3Upload(username, bucket string, content []byte) error {
+	return nil
 }
 
 func awsSession() *session.Session {
