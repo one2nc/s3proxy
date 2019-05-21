@@ -58,6 +58,14 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:ffe9824d294da03b391f44e1ae8281281b4afc1bdaa9588c9097785e3af10cec"
+  name = "github.com/davecgh/go-spew"
+  packages = ["spew"]
+  pruneopts = "UT"
+  revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
+  version = "v1.1.1"
+
+[[projects]]
   digest = "1:76dc72490af7174349349838f2fe118996381b31ea83243812a97e5a0fd5ed55"
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
@@ -108,6 +116,14 @@
   version = "v1.1.0"
 
 [[projects]]
+  digest = "1:0028cb19b2e4c3112225cd871870f2d9cf49b9b4276531f03438a88e94be86fe"
+  name = "github.com/pmezard/go-difflib"
+  packages = ["difflib"]
+  pruneopts = "UT"
+  revision = "792786c7400a136282c1664665ae0a8db921c6c2"
+  version = "v1.0.0"
+
+[[projects]]
   digest = "1:dc56e7178a82f8e84960ed9efa7d4ebd0a6d7864894bfc46f8a35ee5eae7153a"
   name = "github.com/pquerna/otp"
   packages = [
@@ -136,12 +152,20 @@
   version = "1.0.0"
 
 [[projects]]
+  digest = "1:972c2427413d41a1e06ca4897e8528e5a1622894050e2f527b38ddf0f343f759"
+  name = "github.com/stretchr/testify"
+  packages = ["assert"]
+  pruneopts = "UT"
+  revision = "ffdc059bfe9ce6a4e144ba849dbedead332c6053"
+  version = "v1.3.0"
+
+[[projects]]
   branch = "master"
-  digest = "1:8deab47ce0d57b52f9ceb6e8fdc75e965a2449cea562a70a8d0215e346c6a382"
+  digest = "1:dcdd3262420312d1d320e5df4c52281e26ac8506c6ffb987ecf821bbd1daf535"
   name = "github.com/tsocial/ts2fa"
   packages = ["auth"]
   pruneopts = "UT"
-  revision = "f111fbf8902f870667d668ebdd32f6ab092dd93f"
+  revision = "58e03460d5d532cf63ffd3d8e731a5e51729186c"
 
 [[projects]]
   digest = "1:7bb1ad654b21fb8f44c77c07840007d6796f70d42d1b470600f943a508ff8a72"
@@ -161,6 +185,7 @@
     "github.com/aws/aws-sdk-go/service/s3",
     "github.com/dgrijalva/jwt-go",
     "github.com/gorilla/mux",
+    "github.com/stretchr/testify/assert",
     "github.com/tsocial/ts2fa/auth",
   ]
   solver-name = "gps-cdcl"

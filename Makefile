@@ -9,7 +9,7 @@ test: deps
 	env GOCACHE=/tmp/gocache go test -v -race ./...
 
 build: deps
-	env GOCACHE=/tmp/gocache GOOS=linux CGO_ENABLED=0 go build -o s3proxy -a -installsuffix cgo \
+	env GOCACHE=/tmp/gocache GOOS=linux CGO_ENABLED=0 go build -ldflags "-X main.date=$(shell date +%Y-%m-%d-%H:%M:%S)" -o s3proxy -a -installsuffix cgo \
 		github.com/tsocial/s3proxy
 
 docker_up: build

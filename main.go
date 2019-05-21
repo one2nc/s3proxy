@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,7 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	ts2fa "github.com/tsocial/ts2fa/auth"
 )
@@ -47,7 +48,7 @@ type config struct { // nolint
 }
 
 var (
-	version string
+	version = "0.0.1"
 	date    string
 	c       *config
 )
@@ -68,6 +69,7 @@ func main() {
 
 	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
 	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
+	m.Handle("/refresh", http.HandlerFunc(ts2fa.RefreshHandler))
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
@@ -188,26 +190,44 @@ func uploadHandler() http.HandlerFunc {
 
 		t := r.Header.Get("X-Auth-Token")
 
-		token, err := jwt.Parse(t, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-			}
-
-			return []byte(c.jwtSecret), nil
-		})
+		jt, err := validateJwtToken(t)
 		if err != nil {
-			http.Error(w, "Not Authorized", http.StatusUnauthorized)
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
 		}
 
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			if claims["expiry"].(int64) > time.Now().Unix() {
-				if err := s3Upload(claims["username"].(string), c.s3Bucket, b.Bytes()); err != nil {
-					http.Error(w, "error uploading file", http.StatusBadRequest)
+		if err := r.ParseMultipartForm(1024); nil != err {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		log.Println(r.MultipartForm.File)
+
+		svc := s3.New(awsSession())
+		var out []string
+
+		for _, fHeaders := range r.MultipartForm.File {
+			for _, hdr := range fHeaders {
+				infile, err := hdr.Open()
+				if err != nil {
+					http.Error(w, fmt.Sprintf("input-read-error: %+v", err), http.StatusBadRequest)
+				}
+
+				key := filepath.Join(c.s3KeyPrefix, jt.Username, hdr.Filename)
+				if _, err := s3Upload(svc, c.s3Bucket, key, infile); err != nil {
+					http.Error(w, fmt.Sprintf("upload-error: %+v", err), http.StatusInternalServerError)
+					return
+				} else {
+					out = append(out, key)
 				}
 			}
 		}
 
-		http.Error(w, "Not Authorized", http.StatusUnauthorized)
+		resp, _ := json.Marshal(&out)
+
+		if _, err := w.Write(resp); err != nil {
+			log.Printf("response-write-error: %+v", err)
+		}
 	}
 }
 
@@ -216,34 +236,26 @@ func authHandler() http.HandlerFunc {
 		username, password, ok := r.BasicAuth()
 		if !ok {
 			http.Error(w, "Authorization not passed", http.StatusUnauthorized)
+			return
 		}
 
-		token, err := createToken(username, password, time.Now())
+		expiry, err := strconv.ParseInt(c.jwtTokenExpiry, 10, 64)
 		if err != nil {
-			http.Error(w, "Error while validating", http.StatusBadRequest)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		token, err := createToken(username, password, expiry)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		if _, err := w.Write([]byte(token)); err != nil {
-			http.Error(w, "Error while sending response", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("write-response-error: %+v", err), http.StatusBadRequest)
+			return
 		}
-
-		w.WriteHeader(http.StatusOK)
 	}
-}
-
-func createToken(username, password string, now time.Time) (string, error) {
-	i, err := strconv.ParseInt(c.jwtTokenExpiry, 10, 64)
-	if err != nil {
-		return "", nil
-	}
-
-	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
-		"password": password,
-		"expiry":   now.Add(time.Second * time.Duration(i)).Unix(),
-	})
-
-	return t.SignedString([]byte(c.jwtSecret))
 }
 
 func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
@@ -410,8 +422,14 @@ func s3get(backet, key, rangeHeader string) (*s3.GetObjectOutput, error) {
 	return s3.New(awsSession()).GetObject(req)
 }
 
-func s3Upload(username, bucket string, content []byte) error {
-	return nil
+func s3Upload(svc *s3.S3, bucket, key string, data io.ReadSeeker) (*s3.PutObjectOutput, error) {
+	req := &s3.PutObjectInput{
+		Key:    aws.String(key),
+		Bucket: aws.String(bucket),
+		Body:   data,
+	}
+
+	return svc.PutObject(req)
 }
 
 func awsSession() *session.Session {
