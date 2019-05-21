@@ -1,21 +1,27 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"bytes"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/gorilla/mux"
+	ts2fa "github.com/tsocial/ts2fa/auth"
 )
 
 type config struct { // nolint
@@ -37,10 +43,12 @@ type config struct { // nolint
 	corsAllowHeaders string // CORS_ALLOW_HEADERS
 	corsMaxAge       int64  // CORS_MAX_AGE
 	healthCheckPath  string // HEALTHCHECK_PATH
+	jwtTokenExpiry   string
+	jwtSecret        string
 }
 
 var (
-	version string
+	version = "0.0.1"
 	date    string
 	c       *config
 )
@@ -48,20 +56,25 @@ var (
 func main() {
 	c = configFromEnvironmentVariables()
 
-	http.Handle("/", wrapper(awss3))
+	m := mux.NewRouter()
+	m.Handle("/", wrapper(awss3)).Methods(http.MethodGet)
 
-	http.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
+	m.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
 		if len(version) > 0 && len(date) > 0 {
 			fmt.Fprintf(w, "version: %s (built at %s)\n", version, date)
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-	})
+	}).Methods(http.MethodGet)
+
+	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
+	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
+	m.Handle("/refresh", http.HandlerFunc(ts2fa.RefreshHandler))
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
 	log.Printf("[service] listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(addr, m))
 }
 
 func configFromEnvironmentVariables() *config {
@@ -104,6 +117,14 @@ func configFromEnvironmentVariables() *config {
 	if i, err := strconv.ParseInt(os.Getenv("CORS_MAX_AGE"), 10, 64); err == nil {
 		corsMaxAge = i
 	}
+	jwt_token_expiry := os.Getenv("JWT_TOKEN_EXPIRY")
+	if len(jwt_token_expiry) == 0 {
+		jwt_token_expiry = "60"
+	}
+	jwt_secret := os.Getenv("JWT_SECRET")
+	if len(jwt_secret) == 0 {
+		jwt_secret = "secret"
+	}
 	conf := &config{
 		awsRegion:        region,
 		awsAPIEndpoint:   endpoint,
@@ -123,6 +144,8 @@ func configFromEnvironmentVariables() *config {
 		corsAllowHeaders: os.Getenv("CORS_ALLOW_HEADERS"),
 		corsMaxAge:       corsMaxAge,
 		healthCheckPath:  os.Getenv("HEALTHCHECK_PATH"),
+		jwtTokenExpiry:   jwt_token_expiry,
+		jwtSecret:        jwt_secret,
 	}
 	// Proxy
 	log.Printf("[config] Proxy to %v", conf.s3Bucket)
@@ -136,6 +159,7 @@ func configFromEnvironmentVariables() *config {
 	if (len(conf.corsAllowOrigin) > 0) && (conf.corsMaxAge > 0) {
 		log.Printf("[config] CORS enabled: %s", conf.corsAllowOrigin)
 	}
+
 	return conf
 }
 
@@ -155,6 +179,83 @@ func (r *custom) Write(b []byte) (int, error) {
 func (r *custom) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 	r.status = status
+}
+
+func uploadHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var b bytes.Buffer
+		if _, err := r.Body.Read(b.Bytes()); err != nil {
+			http.Error(w, "error processing request", http.StatusBadRequest)
+		}
+
+		t := r.Header.Get("X-Auth-Token")
+
+		jt, err := validateJwtToken(t)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		if err := r.ParseMultipartForm(1024); nil != err {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		log.Println(r.MultipartForm.File)
+
+		svc := s3.New(awsSession())
+		var out []string
+
+		for _, fHeaders := range r.MultipartForm.File {
+			for _, hdr := range fHeaders {
+				infile, err := hdr.Open()
+				if err != nil {
+					http.Error(w, fmt.Sprintf("input-read-error: %+v", err), http.StatusBadRequest)
+				}
+
+				key := filepath.Join(c.s3KeyPrefix, jt.Username, hdr.Filename)
+				if _, err := s3Upload(svc, c.s3Bucket, key, infile); err != nil {
+					http.Error(w, fmt.Sprintf("upload-error: %+v", err), http.StatusInternalServerError)
+					return
+				} else {
+					out = append(out, key)
+				}
+			}
+		}
+
+		resp, _ := json.Marshal(&out)
+
+		if _, err := w.Write(resp); err != nil {
+			log.Printf("response-write-error: %+v", err)
+		}
+	}
+}
+
+func authHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			http.Error(w, "Authorization not passed", http.StatusUnauthorized)
+			return
+		}
+
+		expiry, err := strconv.ParseInt(c.jwtTokenExpiry, 10, 64)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		token, err := createToken(username, password, expiry)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if _, err := w.Write([]byte(token)); err != nil {
+			http.Error(w, fmt.Sprintf("write-response-error: %+v", err), http.StatusBadRequest)
+			return
+		}
+	}
 }
 
 func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
@@ -319,6 +420,16 @@ func s3get(backet, key, rangeHeader string) (*s3.GetObjectOutput, error) {
 		Range:  rangeHeaderAwsString,
 	}
 	return s3.New(awsSession()).GetObject(req)
+}
+
+func s3Upload(svc *s3.S3, bucket, key string, data io.ReadSeeker) (*s3.PutObjectOutput, error) {
+	req := &s3.PutObjectInput{
+		Key:    aws.String(key),
+		Bucket: aws.String(bucket),
+		Body:   data,
+	}
+
+	return svc.PutObject(req)
 }
 
 func awsSession() *session.Session {
