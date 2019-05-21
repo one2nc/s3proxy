@@ -1,2 +1,21 @@
-vendor/
+# Ignore all
+*
+
+# Unignore all with extensions
+!*.*
+
+# Unignore all Makefile
+!*Makefile
+!*Dockerfile
+
+# Unignore all dirs
+!*/
+
+# Ignore folders.
 .idea
+*.iml
+pkg*
+bin*
+*vendor*
+dist/
+*dist*

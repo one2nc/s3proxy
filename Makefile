@@ -1,19 +1,30 @@
 SHELL = bash
 SERVER_REPO := "tsl8/s3proxy"
 
-docker_up:
+deps:
+	dep version || (curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh)
+	dep ensure -v
+
+test: deps
+	env GOCACHE=/tmp/gocache go test -v -race ./...
+
+build: deps
+	env GOCACHE=/tmp/gocache GOOS=linux CGO_ENABLED=0 go build -o s3proxy -a -installsuffix cgo \
+		github.com/tsocial/s3proxy
+
+docker_up: build
 	docker-compose -f docker-compose.yaml up -d
 
 docker_down:
 	docker-compose -f docker-compose.yaml down
 
-build_image:
+build_image: build
 	docker-compose -f docker-compose.yaml build
 
 docker_login:
 	echo "$(DOCKER_PASSWORD)" | docker login -u "$(DOCKER_USERNAME)" --password-stdin
 
-upload_image: docker_login
+upload_image: docker_login build_image
 	docker tag $(SERVER_REPO):latest $(SERVER_REPO):$(TRAVIS_BRANCH)-latest
 	docker tag $(SERVER_REPO):latest $(SERVER_REPO):$(TRAVIS_BRANCH)-$(TRAVIS_BUILD_NUMBER)
 	docker push $(SERVER_REPO):latest
