@@ -12,8 +12,6 @@ services:
 script:
   - make test
   - make build_image
-  - make docker_up
-  - curl -sL -w "%{http_code}\\n" "http://localhost:24545/health" -o /dev/null --fail --show-error
 
 deploy:
   - provider: script
