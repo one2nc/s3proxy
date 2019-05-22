@@ -57,8 +57,6 @@ func main() {
 	c = configFromEnvironmentVariables()
 
 	m := mux.NewRouter()
-	m.Handle("/", wrapper(awss3)).Methods(http.MethodGet)
-
 	m.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
 		if len(version) > 0 && len(date) > 0 {
 			fmt.Fprintf(w, "version: %s (built at %s)\n", version, date)
@@ -70,6 +68,8 @@ func main() {
 	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
 	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
 	m.Handle("/refresh", http.HandlerFunc(ts2fa.RefreshHandler))
+
+	m.PathPrefix("/").Handler(wrapper(awss3)).Methods(http.MethodGet)
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
