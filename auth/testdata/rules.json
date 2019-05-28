@@ -1,0 +1,25 @@
+{
+  "rules": {
+    "test": {
+      "key1": {
+        "emails": ["xyz@trustingsocial.com"]
+      },
+      "key2": {
+        "emails": ["xyz@trustingsocial.com"]
+      },
+      "*": {
+        "secrets": ["7VP7X6OC37YVIRVI"]
+      }
+    },
+    "foo": {
+      "*": {
+        "whitelisted_ips": ["1.1.1.1"]
+      }
+    },
+    "*": {
+      "*": {
+        "emails": ["admin@trustingsocial.com"]
+      }
+    }
+  }
+}

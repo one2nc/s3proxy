@@ -1,24 +1,25 @@
 package auth
 
 import (
-	"fmt"
+	"encoding/json"
+	"io/ioutil"
 	"log"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/pquerna/otp/totp"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var pritunlUsers = []User{
 	{
-		Email:     "abc@trustingsocial.com",
+		Email:     "xyz@trustingsocial.com",
 		OtpSecret: "7VP7X6OC37YVIRVI",
 	},
 	{
-		Email:     "123@trustingsocial.com",
+		Email:     "456@trustingsocial.com",
 		OtpSecret: "GMYDQN3GGVRWIY3CMNQWINLFGE3DQOJUHFRDOM3DHBSWEZDGGVRA",
 	},
 }
@@ -36,27 +37,23 @@ func TestNew(t *testing.T) {
 	})
 }
 
-func TestVerify(t *testing.T) {
-	rules := Rules{
-		"/test": map[string]Rule{
-			"key1": {
-				Emails: []string{"abc@trustingsocial.com"},
-			},
-			DEFAULT: {
-				Emails: []string{"abc@trustingsocial.com"},
-			},
-		},
-		"/foo": map[string]Rule{
-			DEFAULT: {WhitelistedIPs: []string{"1.1.1.1"}},
-		},
-		DEFAULT: map[string]Rule{
-			DEFAULT: {Emails: []string{"123@trustingsocial.com"}},
-		},
-	}
+func TestSeedData(t *testing.T) {
+	t.Run("seed data successfully", func(t *testing.T) {
+		assert.Nil(t, SeedData("testdata/pritunl_data.json"))
+		assert.NotNil(t, store)
+		assert.Equal(t, 3, len(store.secrets))
+	})
+}
 
-	log.Println(pritunlUsers)
-	x := New(&RulesConf{Rules: rules})
-	InitStore()
+func TestVerify(t *testing.T) {
+	var rc RulesConf
+	rcBytes, err := ioutil.ReadFile("testdata/rules.json")
+	assert.Nil(t, err)
+
+	assert.Nil(t, json.Unmarshal(rcBytes, &rc))
+
+	assert.Nil(t, InitStore())
+	x := New(&rc)
 	log.Println(pritunlUsers)
 	t.Run("Verify against a nil paylod", func(t *testing.T) {
 		valid, err := x.Verify(nil)
@@ -64,42 +61,52 @@ func TestVerify(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("Verify a payload", func(t *testing.T) {
-		t.Run("Missing path catches default", func(t *testing.T) {
-			p := NewPayload("/missing", "key1", "", "123@trustingsocial.com", "12345")
+	t.Run("fail for missing email and invalid secret otp", func(t *testing.T) {
+		p := NewPayload("test", "key1", "", "", "12345")
+		valid, err := x.Verify(p)
+		assert.False(t, valid)
+		assert.NotNil(t, err)
+	})
 
-			t.Run("Invalid default secret", func(t *testing.T) {
-				valid, err := x.Verify(p)
-				assert.False(t, valid, "Should fail validation")
-				assert.NotNil(t, err)
-			})
+	t.Run("fail for missing key with invalid OTP", func(t *testing.T) {
+		p := NewPayload("test", "missing", "", "", "12345")
+		valid, err := x.Verify(p)
+		assert.False(t, valid)
+		assert.NotNil(t, err)
+	})
 
-			t.Run("Valid default secret", func(t *testing.T) {
-				p.Otp, _ = totp.GenerateCode(pritunlUsers[1].OtpSecret, time.Now())
-				valid, err := x.Verify(p)
-				assert.True(t, valid, fmt.Sprintf("%+v", pritunlUsers[1]))
-				assert.Nil(t, err)
-			})
-		})
+	t.Run("pass for missing key with valid OTP", func(t *testing.T) {
+		otp, err := totp.GenerateCode("7VP7X6OC37YVIRVI", time.Now())
 
-		t.Run("/test", func(t *testing.T) {
-			t.Run("key1", func(t *testing.T) {
-				p := NewPayload("/test", "key1", "", "abc@trustingsocial.com", "12345")
+		assert.Nil(t, err)
 
-				t.Run("Invalid secret", func(t *testing.T) {
-					valid, err := x.Verify(p)
-					assert.False(t, valid, "Should fail validation")
-					assert.NotNil(t, err)
-				})
+		p := NewPayload("test", "missing", "", "", otp)
+		valid, err := x.Verify(p)
+		assert.True(t, valid)
+		assert.Nil(t, err)
+	})
 
-				t.Run("Valid secret", func(t *testing.T) {
-					p.Otp, _ = totp.GenerateCode(pritunlUsers[0].OtpSecret, time.Now())
-					valid, err := x.Verify(p)
-					assert.True(t, valid)
-					assert.Nil(t, err)
-				})
-			})
-		})
+	t.Run("pass for missing email and otp but whitelisted IP", func(t *testing.T) {
+		p := NewPayload("foo", "missing", "1.1.1.1", "", "")
+		valid, err := x.Verify(p)
+		assert.True(t, valid)
+		assert.Nil(t, err)
+	})
 
+	t.Run("pass for wrong email and otp but whitelisted IP", func(t *testing.T) {
+		p := NewPayload("foo", "missing", "1.1.1.1", "missing@trustingsocial.com", "12345")
+		valid, err := x.Verify(p)
+		assert.True(t, valid)
+		assert.Nil(t, err)
+	})
+
+	t.Run("pass for admin email with valid otp for any resource", func(t *testing.T) {
+		otp, err := totp.GenerateCode("GMYDQN3GGVRWIY3CMNQWINLFGE3DQOJUHFRDOM3DHBSWEZDGGVRA", time.Now())
+		assert.Nil(t, err)
+
+		p := NewPayload("foo", "missing", "", "admin@trustingsocial.com", otp)
+		valid, err := x.Verify(p)
+		assert.True(t, valid)
+		assert.Nil(t, err)
 	})
 }

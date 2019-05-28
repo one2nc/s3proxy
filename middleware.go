@@ -49,7 +49,12 @@ func TwoFaValidate(f http.Handler) http.Handler {
 			path = parts[1]
 		}
 
-		o := auth.NewPayload(path, r.Method, r.RemoteAddr, email, token)
+		// Making an assumption that this code will always run behind reverse proxy,
+		// I think it should be decided based on configuration like "proxy=true".
+		// by default, read source Ip from r.RequestAddr but if proxy=true, read from header.
+		sourceIP := r.Header.Get("X-Forwarded-For")
+
+		o := auth.NewPayload(path, r.Method, sourceIP, email, token)
 
 		if valid, err := t.Verify(o); !valid {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
