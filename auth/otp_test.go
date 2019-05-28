@@ -13,20 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var pritunlUsers = []User{
-	{
-		Email:     "xyz@trustingsocial.com",
-		OtpSecret: "7VP7X6OC37YVIRVI",
-	},
-	{
-		Email:     "456@trustingsocial.com",
-		OtpSecret: "GMYDQN3GGVRWIY3CMNQWINLFGE3DQOJUHFRDOM3DHBSWEZDGGVRA",
-	},
-}
-
 func TestMain(m *testing.M) {
-	log.SetFlags(log.LstdFlags)
-	PritunlMockServer(pritunlUsers)
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	os.Exit(m.Run())
 }
 
@@ -52,9 +40,7 @@ func TestVerify(t *testing.T) {
 
 	assert.Nil(t, json.Unmarshal(rcBytes, &rc))
 
-	assert.Nil(t, InitStore())
 	x := New(&rc)
-	log.Println(pritunlUsers)
 	t.Run("Verify against a nil paylod", func(t *testing.T) {
 		valid, err := x.Verify(nil)
 		assert.True(t, valid, "Validation should pass")

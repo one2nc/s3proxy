@@ -22,38 +22,6 @@ type secretStore struct {
 }
 
 var store *secretStore
-var lock sync.RWMutex
-
-func InitStore() error {
-	lock.RLock()
-
-	if store != nil {
-		lock.RUnlock()
-		return nil
-	}
-
-	lock.RUnlock()
-	return Refresh()
-}
-
-func Refresh() error {
-	lock.Lock()
-	defer lock.Unlock()
-
-	if store == nil {
-		store = &secretStore{
-			secrets: make(map[string]string),
-		}
-	}
-
-	data, err := fetchPritunlData()
-	if err != nil {
-		return err
-	}
-	store.update(data)
-
-	return nil
-}
 
 func SeedData(filepath string) error {
 	contents, err := ioutil.ReadFile(filepath)

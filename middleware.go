@@ -10,7 +10,7 @@ import (
 	"github.com/tsocial/s3proxy/auth"
 )
 
-func TwoFaValidate(f http.Handler) http.Handler {
+func authorize(f http.Handler) http.Handler {
 	configPath := os.Getenv("AUTH_CONFIG")
 	if configPath == "" {
 		panic("AUTH_CONFIG env is not set")
@@ -49,10 +49,10 @@ func TwoFaValidate(f http.Handler) http.Handler {
 			path = parts[1]
 		}
 
-		// Making an assumption that this code will always run behind reverse proxy,
-		// I think it should be decided based on configuration like "proxy=true".
-		// by default, read source Ip from r.RequestAddr but if proxy=true, read from header.
-		sourceIP := r.Header.Get("X-Forwarded-For")
+		sourceIP := r.RemoteAddr
+		if ip, found := header(r, "X-Forwarded-For"); found {
+			sourceIP = ip
+		}
 
 		o := auth.NewPayload(path, r.Method, sourceIP, email, token)
 
