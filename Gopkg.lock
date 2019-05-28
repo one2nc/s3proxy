@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:4be1072e30ee4f8f1d3aaefca683453299dc99310f0ff0cb48016a2df242b0e0"
+  digest = "1:ddcc6132b6b7f6d992b175a3b2631933ce3c870518758c888d1140582211c1e1"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -42,8 +42,8 @@
     "service/sts",
   ]
   pruneopts = "UT"
-  revision = "3e3b24dd55ca4bb508c7e78142632646ee6e8714"
-  version = "v1.19.34"
+  revision = "8943f83bb1e98c94710f767576fe17cc29adb4dd"
+  version = "v1.19.38"
 
 [[projects]]
   digest = "1:7b94d37d65c0445053c6f3e73090e3966c1c29127035492c349e14f25c440359"
@@ -160,14 +160,6 @@
   version = "v1.3.0"
 
 [[projects]]
-  branch = "master"
-  digest = "1:dcdd3262420312d1d320e5df4c52281e26ac8506c6ffb987ecf821bbd1daf535"
-  name = "github.com/tsocial/ts2fa"
-  packages = ["auth"]
-  pruneopts = "UT"
-  revision = "58e03460d5d532cf63ffd3d8e731a5e51729186c"
-
-[[projects]]
   digest = "1:7bb1ad654b21fb8f44c77c07840007d6796f70d42d1b470600f943a508ff8a72"
   name = "gopkg.in/go-playground/validator.v9"
   packages = ["."]
@@ -185,8 +177,11 @@
     "github.com/aws/aws-sdk-go/service/s3",
     "github.com/dgrijalva/jwt-go",
     "github.com/gorilla/mux",
+    "github.com/pquerna/otp/totp",
+    "github.com/satori/go.uuid",
+    "github.com/sethgrid/pester",
     "github.com/stretchr/testify/assert",
-    "github.com/tsocial/ts2fa/auth",
+    "gopkg.in/go-playground/validator.v9",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

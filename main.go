@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tsocial/s3proxy/auth"
+
 	"bytes"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -21,7 +23,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/mux"
-	ts2fa "github.com/tsocial/ts2fa/auth"
 )
 
 type config struct { // nolint
@@ -53,7 +54,10 @@ var (
 	c       *config
 )
 
+const Secure = "secure"
+
 func main() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	c = configFromEnvironmentVariables()
 
 	m := mux.NewRouter()
@@ -65,11 +69,24 @@ func main() {
 		}
 	}).Methods(http.MethodGet)
 
-	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
+	m.Handle("/auth", TwoFaValidate(authHandler())).Methods(http.MethodPost)
 	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
-	m.Handle("/refresh", http.HandlerFunc(ts2fa.RefreshHandler))
+	m.Handle("/refresh", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := auth.Refresh(); err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
-	m.PathPrefix("/").Handler(wrapper(awss3)).Methods(http.MethodGet)
+		if _, err := w.Write([]byte(`{"success": true}`)); err != nil {
+			log.Printf("response-write-error: %+v", err)
+		}
+	}))
+
+	if os.Getenv("DOWNLOAD") == Secure {
+		m.PathPrefix("/").Handler(TwoFaValidate(wrapper(awss3))).Methods(http.MethodGet)
+	} else {
+		m.PathPrefix("/").Handler(wrapper(awss3)).Methods(http.MethodGet)
+	}
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
@@ -189,6 +206,7 @@ func uploadHandler() http.HandlerFunc {
 		}
 
 		t := r.Header.Get("X-Auth-Token")
+		project := r.Header.Get("X-Project-Name")
 
 		jt, err := validateJwtToken(t)
 		if err != nil {
@@ -201,8 +219,6 @@ func uploadHandler() http.HandlerFunc {
 			return
 		}
 
-		log.Println(r.MultipartForm.File)
-
 		svc := s3.New(awsSession())
 		var out []string
 
@@ -213,7 +229,7 @@ func uploadHandler() http.HandlerFunc {
 					http.Error(w, fmt.Sprintf("input-read-error: %+v", err), http.StatusBadRequest)
 				}
 
-				key := filepath.Join(c.s3KeyPrefix, jt.Username, hdr.Filename)
+				key := filepath.Join(c.s3KeyPrefix, project, jt.Username, hdr.Filename)
 				if _, err := s3Upload(svc, c.s3Bucket, key, infile); err != nil {
 					http.Error(w, fmt.Sprintf("upload-error: %+v", err), http.StatusInternalServerError)
 					return
@@ -266,7 +282,7 @@ func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
 			w.Header().Set("Access-Control-Allow-Headers", c.corsAllowHeaders)
 			w.Header().Set("Access-Control-Max-Age", strconv.FormatInt(c.corsMaxAge, 10))
 		}
-		if (len(c.basicAuthUser) > 0) && (len(c.basicAuthPass) > 0) && !auth(r) && !isHealthCheckPath(r) {
+		if (len(c.basicAuthUser) > 0) && (len(c.basicAuthPass) > 0) && !basicAuth(r) && !isHealthCheckPath(r) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="REALM"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
@@ -288,7 +304,7 @@ func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
 	})
 }
 
-func auth(r *http.Request) bool {
+func basicAuth(r *http.Request) bool {
 	if username, password, ok := r.BasicAuth(); ok {
 		return username == c.basicAuthUser &&
 			password == c.basicAuthPass
