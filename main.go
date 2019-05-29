@@ -21,7 +21,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/mux"
-	ts2fa "github.com/tsocial/ts2fa/auth"
 )
 
 type config struct { // nolint
@@ -54,22 +53,28 @@ var (
 )
 
 func main() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	c = configFromEnvironmentVariables()
 
 	m := mux.NewRouter()
 	m.HandleFunc("/--version", func(w http.ResponseWriter, r *http.Request) {
 		if len(version) > 0 && len(date) > 0 {
-			fmt.Fprintf(w, "version: %s (built at %s)\n", version, date)
+			if _, err := fmt.Fprintf(w, "version: %s (built at %s)\n", version, date); err != nil {
+				log.Printf("write-error: %+v", err)
+			}
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
 	}).Methods(http.MethodGet)
 
-	m.Handle("/auth", ts2fa.Validate(authHandler())).Methods(http.MethodPost)
+	m.Handle("/auth", authorize(authHandler())).Methods(http.MethodPost)
 	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
-	m.Handle("/refresh", http.HandlerFunc(ts2fa.RefreshHandler))
 
-	m.PathPrefix("/").Handler(wrapper(awss3)).Methods(http.MethodGet)
+	if os.Getenv("SECURE_DOWNLOAD") != "" {
+		m.PathPrefix("/").Handler(authorize(wrapper(awss3))).Methods(http.MethodGet)
+	} else {
+		m.PathPrefix("/").Handler(wrapper(awss3)).Methods(http.MethodGet)
+	}
 
 	// Listen & Serve
 	addr := net.JoinHostPort(c.host, c.port)
@@ -109,21 +114,21 @@ func configFromEnvironmentVariables() *config {
 	if b, err := strconv.ParseBool(os.Getenv("ACCESS_LOG")); err == nil {
 		accessLog = b
 	}
-	contentEncoging := false
+	contentEncoding := false
 	if b, err := strconv.ParseBool(os.Getenv("CONTENT_ENCODING")); err == nil {
-		contentEncoging = b
+		contentEncoding = b
 	}
 	corsMaxAge := int64(600)
 	if i, err := strconv.ParseInt(os.Getenv("CORS_MAX_AGE"), 10, 64); err == nil {
 		corsMaxAge = i
 	}
-	jwt_token_expiry := os.Getenv("JWT_TOKEN_EXPIRY")
-	if len(jwt_token_expiry) == 0 {
-		jwt_token_expiry = "60"
+	jwtTokenExpiry := os.Getenv("JWT_TOKEN_EXPIRY")
+	if len(jwtTokenExpiry) == 0 {
+		jwtTokenExpiry = "60"
 	}
-	jwt_secret := os.Getenv("JWT_SECRET")
-	if len(jwt_secret) == 0 {
-		jwt_secret = "secret"
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if len(jwtSecret) == 0 {
+		jwtSecret = "secret"
 	}
 	conf := &config{
 		awsRegion:        region,
@@ -138,14 +143,14 @@ func configFromEnvironmentVariables() *config {
 		host:             os.Getenv("APP_HOST"),
 		accessLog:        accessLog,
 		stripPath:        os.Getenv("STRIP_PATH"),
-		contentEncoding:  contentEncoging,
+		contentEncoding:  contentEncoding,
 		corsAllowOrigin:  os.Getenv("CORS_ALLOW_ORIGIN"),
 		corsAllowMethods: os.Getenv("CORS_ALLOW_METHODS"),
 		corsAllowHeaders: os.Getenv("CORS_ALLOW_HEADERS"),
 		corsMaxAge:       corsMaxAge,
 		healthCheckPath:  os.Getenv("HEALTHCHECK_PATH"),
-		jwtTokenExpiry:   jwt_token_expiry,
-		jwtSecret:        jwt_secret,
+		jwtTokenExpiry:   jwtTokenExpiry,
+		jwtSecret:        jwtSecret,
 	}
 	// Proxy
 	log.Printf("[config] Proxy to %v", conf.s3Bucket)
@@ -189,6 +194,7 @@ func uploadHandler() http.HandlerFunc {
 		}
 
 		t := r.Header.Get("X-Auth-Token")
+		project := r.Header.Get("X-Project-Name")
 
 		jt, err := validateJwtToken(t)
 		if err != nil {
@@ -201,8 +207,6 @@ func uploadHandler() http.HandlerFunc {
 			return
 		}
 
-		log.Println(r.MultipartForm.File)
-
 		svc := s3.New(awsSession())
 		var out []string
 
@@ -213,7 +217,7 @@ func uploadHandler() http.HandlerFunc {
 					http.Error(w, fmt.Sprintf("input-read-error: %+v", err), http.StatusBadRequest)
 				}
 
-				key := filepath.Join(c.s3KeyPrefix, jt.Username, hdr.Filename)
+				key := filepath.Join(c.s3KeyPrefix, project, jt.Username, hdr.Filename)
 				if _, err := s3Upload(svc, c.s3Bucket, key, infile); err != nil {
 					http.Error(w, fmt.Sprintf("upload-error: %+v", err), http.StatusInternalServerError)
 					return
@@ -266,7 +270,7 @@ func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
 			w.Header().Set("Access-Control-Allow-Headers", c.corsAllowHeaders)
 			w.Header().Set("Access-Control-Max-Age", strconv.FormatInt(c.corsMaxAge, 10))
 		}
-		if (len(c.basicAuthUser) > 0) && (len(c.basicAuthPass) > 0) && !auth(r) && !isHealthCheckPath(r) {
+		if (len(c.basicAuthUser) > 0) && (len(c.basicAuthPass) > 0) && !basicAuth(r) && !isHealthCheckPath(r) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="REALM"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
@@ -288,7 +292,7 @@ func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
 	})
 }
 
-func auth(r *http.Request) bool {
+func basicAuth(r *http.Request) bool {
 	if username, password, ok := r.BasicAuth(); ok {
 		return username == c.basicAuthUser &&
 			password == c.basicAuthPass
@@ -339,7 +343,9 @@ func awss3(w http.ResponseWriter, r *http.Request) {
 	}
 	setHeadersFromAwsResponse(w, obj)
 
-	io.Copy(w, obj.Body) // nolint
+	if _, err := io.Copy(w, obj.Body); err != nil {
+		log.Printf("io-copy-error: %+v", err)
+	} // nolint
 }
 
 func setHeadersFromAwsResponse(w http.ResponseWriter, obj *s3.GetObjectOutput) {
