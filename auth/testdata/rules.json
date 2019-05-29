@@ -1,10 +1,10 @@
 {
   "rules": {
     "test": {
-      "key1": {
+      "POST": {
         "emails": ["xyz@trustingsocial.com"]
       },
-      "key2": {
+      "GET": {
         "emails": ["xyz@trustingsocial.com"]
       },
       "*": {

@@ -26,41 +26,50 @@ type TsAuth struct {
 	rules Rules
 }
 
-type Payload struct {
-	Path     string
-	Key      string
-	SourceIP string
-	Email    string
-	Otp      string
+type payload struct {
+	path             string
+	key              string
+	sourceIP         string
+	email            string
+	otp              string
+	allowDefaultPath bool
 }
 
-func NewPayload(p, k, s, e, o string) *Payload {
-	return &Payload{p, k, s, e, o}
+func NewPayload(p, k, s, e, o string, a bool) *payload {
+	return &payload{p, k, s, e, o, a}
 }
 
-func (t *TsAuth) Verify(p *Payload) (bool, error) {
+func (t *TsAuth) Verify(p *payload) (bool, error) {
 	if p == nil {
-		return true, nil
+		return false, errors.New("payload is nil")
 	}
 
-	check := func(rules map[string]Rule, p *Payload) (bool, error) {
-		rule, ok := rules[p.Key]
+	check := func(rules map[string]Rule, p *payload) (bool, error) {
+		rule, ok := rules[p.key]
 		if !ok {
 			rule, ok = rules[DEFAULT]
 		}
 		if !ok {
-			return false, fmt.Errorf("rule is not configured for action %v", p.Key)
+			return false, fmt.Errorf("rule is not configured for action %v", p.key)
 		}
 
 		if len(rule.WhitelistedIPs) == 0 && len(rule.Emails) == 0 && len(rule.Secrets) == 0 {
-			return true, nil
+			return false, errors.New("no rules specified in configuration, contact service administrator")
 		}
 
-		// If Email and otp is passed, check from pritunl config
-		if p.Email != "" && p.Otp != "" && len(rule.Emails) > 0 {
+		if p.sourceIP != "" {
+			for _, w := range rule.WhitelistedIPs {
+				if w == p.sourceIP {
+					return true, nil
+				}
+			}
+		}
+
+		// If email and otp is passed, check from pritunl config
+		if p.email != "" && p.otp != "" && len(rule.Emails) > 0 {
 			for _, e := range rule.Emails {
-				if e == p.Email {
-					if !IsValid(p.Email, p.Otp) {
+				if e == p.email {
+					if !IsValid(p.email, p.otp) {
 						return false, errors.New("invalid OTP")
 					}
 
@@ -70,17 +79,9 @@ func (t *TsAuth) Verify(p *Payload) (bool, error) {
 		}
 
 		// If otp is passed without email, check in secrets
-		if p.Email == "" && p.Otp != "" && len(rule.Secrets) > 0 {
+		if p.email == "" && p.otp != "" && len(rule.Secrets) > 0 {
 			for _, s := range rule.Secrets {
-				if totp.Validate(p.Otp, s) {
-					return true, nil
-				}
-			}
-		}
-
-		if p.SourceIP != "" {
-			for _, w := range rule.WhitelistedIPs {
-				if w == p.SourceIP {
+				if totp.Validate(p.otp, s) {
 					return true, nil
 				}
 			}
@@ -89,9 +90,13 @@ func (t *TsAuth) Verify(p *Payload) (bool, error) {
 		return false, errors.New(http.StatusText(http.StatusUnauthorized))
 	}
 
-	rules, ok := t.rules[p.Path]
+	rules, ok := t.rules[p.path]
 	defaultRules, dOk := t.rules[DEFAULT]
 	var valid bool
+
+	if !ok && dOk && p.allowDefaultPath {
+		return check(defaultRules, p)
+	}
 
 	if ok {
 		valid, _ = check(rules, p)
@@ -101,7 +106,7 @@ func (t *TsAuth) Verify(p *Payload) (bool, error) {
 		return valid, nil
 	}
 
-	if !valid && dOk {
+	if ok && dOk {
 		return check(defaultRules, p)
 	}
 

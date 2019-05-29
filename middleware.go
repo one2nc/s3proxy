@@ -43,8 +43,10 @@ func authorize(f http.Handler) http.Handler {
 		parts := strings.Split(r.URL.Path, "/")
 
 		var path string
+		allowDefaultPass := true
 		if r.Method != http.MethodGet {
 			path = r.Header.Get("X-Project-Name")
+			allowDefaultPass = false
 		} else {
 			path = parts[1]
 		}
@@ -54,7 +56,7 @@ func authorize(f http.Handler) http.Handler {
 			sourceIP = ip
 		}
 
-		o := auth.NewPayload(path, r.Method, sourceIP, email, token)
+		o := auth.NewPayload(path, r.Method, sourceIP, email, token, allowDefaultPass)
 
 		if valid, err := t.Verify(o); !valid {
 			http.Error(w, err.Error(), http.StatusUnauthorized)

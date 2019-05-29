@@ -1,11 +1,7 @@
 [
   {
-    "email": "abc@trustingsocial.com",
+    "email": "xyz@trustingsocial.com",
     "otp_secret": "7VP7X6OC37YVIRVI"
-  },
-  {
-    "email": "123@trustingsocial.com",
-    "otp_secret": "GMYDQN3GGVRWIY3CMNQWINLFGE3DQOJUHFRDOM3DHBSWEZDGGVRA"
   },
   {
     "email": "admin@trustingsocial.com",
