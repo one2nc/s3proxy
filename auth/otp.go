@@ -32,11 +32,12 @@ type payload struct {
 	sourceIP         string
 	email            string
 	otp              string
+	otpRequired      bool
 	allowDefaultPath bool
 }
 
-func NewPayload(p, k, s, e, o string, a bool) *payload {
-	return &payload{p, k, s, e, o, a}
+func NewPayload(p, k, s, e, o string, or, a bool) *payload {
+	return &payload{p, k, s, e, o, or, a}
 }
 
 func (t *TsAuth) Verify(p *payload) (bool, error) {
@@ -60,6 +61,11 @@ func (t *TsAuth) Verify(p *payload) (bool, error) {
 		if p.sourceIP != "" {
 			for _, w := range rule.WhitelistedIPs {
 				if w == p.sourceIP {
+					if p.otpRequired {
+						if !IsValid(p.email, p.otp) {
+							return false, errors.New("invalid OTP")
+						}
+					}
 					return true, nil
 				}
 			}

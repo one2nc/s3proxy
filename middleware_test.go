@@ -149,4 +149,29 @@ func TestAuthorize(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
+
+	t.Run("fail upload for valid path with whitelisted IP but invalid OTP", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/upload", bytes.NewBuffer([]byte("upload_request")))
+		assert.Nil(t, err)
+		req.Header.Set("X-Project-Name", "foo")
+		req.Header.Set("X-Forwarded-For", "1.1.1.1")
+		req.SetBasicAuth("abc@trustingsocial.com", "12456")
+		c := http.Client{}
+		resp, _ := c.Do(req)
+
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	})
+
+	t.Run("pass upload for valid path with whitelisted IP with valid OTP", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/upload", bytes.NewBuffer([]byte("upload_request")))
+		assert.Nil(t, err)
+		req.Header.Set("X-Project-Name", "foo")
+		req.Header.Set("X-Forwarded-For", "1.1.1.1")
+		otp, _ := totp.GenerateCode("7VP7X6OC37YVIRVI", time.Now())
+		req.SetBasicAuth("abc@trustingsocial.com", otp)
+		c := http.Client{}
+		resp, _ := c.Do(req)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
 }

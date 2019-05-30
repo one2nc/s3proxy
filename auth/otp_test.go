@@ -29,7 +29,7 @@ func TestSeedData(t *testing.T) {
 	t.Run("seed data successfully", func(t *testing.T) {
 		assert.Nil(t, SeedData("testdata/pritunl_data.json"))
 		assert.NotNil(t, store)
-		assert.Equal(t, 2, len(store.secrets))
+		assert.Equal(t, 3, len(store.secrets))
 	})
 }
 
@@ -48,14 +48,14 @@ func TestVerify(t *testing.T) {
 	})
 
 	t.Run("fail for missing email and invalid secret otp", func(t *testing.T) {
-		p := NewPayload("test", "key1", "", "", "12345", true)
+		p := NewPayload("test", "key1", "", "", "12345", true, true)
 		valid, err := x.Verify(p)
 		assert.False(t, valid)
 		assert.NotNil(t, err)
 	})
 
 	t.Run("fail for missing key with invalid OTP", func(t *testing.T) {
-		p := NewPayload("test", "missing", "", "", "12345", true)
+		p := NewPayload("test", "missing", "", "", "12345", true, true)
 		valid, err := x.Verify(p)
 		assert.False(t, valid)
 		assert.NotNil(t, err)
@@ -66,21 +66,29 @@ func TestVerify(t *testing.T) {
 
 		assert.Nil(t, err)
 
-		p := NewPayload("test", "missing", "", "", otp, true)
+		p := NewPayload("test", "missing", "", "", otp, true, true)
 		valid, err := x.Verify(p)
 		assert.True(t, valid)
 		assert.Nil(t, err)
 	})
 
 	t.Run("pass for missing email and otp but whitelisted IP", func(t *testing.T) {
-		p := NewPayload("foo", "missing", "1.1.1.1", "", "", true)
+		p := NewPayload("foo", "missing", "1.1.1.1", "", "", false, true)
 		valid, err := x.Verify(p)
 		assert.True(t, valid)
 		assert.Nil(t, err)
 	})
 
+	t.Run("fail for missing email and otp but whitelisted IP and required otp", func(t *testing.T) {
+		p := NewPayload("foo", "missing", "1.1.1.1", "", "", true, true)
+		valid, err := x.Verify(p)
+		assert.False(t, valid)
+		assert.NotNil(t, err)
+	})
+
 	t.Run("pass for wrong email and otp but whitelisted IP", func(t *testing.T) {
-		p := NewPayload("foo", "missing", "1.1.1.1", "missing@trustingsocial.com", "12345", true)
+		p := NewPayload("foo", "missing", "1.1.1.1", "missing@trustingsocial.com", "12345",
+			false, true)
 		valid, err := x.Verify(p)
 		assert.True(t, valid)
 		assert.Nil(t, err)
@@ -90,7 +98,7 @@ func TestVerify(t *testing.T) {
 		otp, err := totp.GenerateCode("GMYDQN3GGVRWIY3CMNQWINLFGE3DQOJUHFRDOM3DHBSWEZDGGVRA", time.Now())
 		assert.Nil(t, err)
 
-		p := NewPayload("foo", "missing", "", "admin@trustingsocial.com", otp, true)
+		p := NewPayload("foo", "missing", "", "admin@trustingsocial.com", otp, true, true)
 		valid, err := x.Verify(p)
 		assert.True(t, valid)
 		assert.Nil(t, err)

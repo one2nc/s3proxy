@@ -44,9 +44,12 @@ func authorize(f http.Handler) http.Handler {
 
 		var path string
 		allowDefaultPass := true
+		var otpValidationRequired bool
+
 		if r.Method != http.MethodGet {
 			path = r.Header.Get("X-Project-Name")
 			allowDefaultPass = false
+			otpValidationRequired = true
 		} else {
 			path = parts[1]
 		}
@@ -56,7 +59,7 @@ func authorize(f http.Handler) http.Handler {
 			sourceIP = ip
 		}
 
-		o := auth.NewPayload(path, r.Method, sourceIP, email, token, allowDefaultPass)
+		o := auth.NewPayload(path, r.Method, sourceIP, email, token, otpValidationRequired, allowDefaultPass)
 
 		if valid, err := t.Verify(o); !valid {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
