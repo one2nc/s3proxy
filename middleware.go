@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/tsocial/s3proxy/auth"
 )
@@ -59,13 +63,40 @@ func authorize(f http.Handler) http.Handler {
 			sourceIP = ip
 		}
 
-		o := auth.NewPayload(path, r.Method, sourceIP, email, token, otpValidationRequired, allowDefaultPass)
+		ioWriter := w.(io.Writer)
+		writer := &custom{Writer: ioWriter, ResponseWriter: w, status: http.StatusOK}
 
-		if valid, err := t.Verify(o); !valid {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+		proc := time.Now()
+
+		defer func() {
+			log.Printf("[%s] %.3f %d %s %s %s %s",
+				sourceIP, time.Since(proc).Seconds(),
+				writer.status, r.Method, email, path, r.URL)
+		}()
+
+		at := r.Header.Get("X-Auth-Token")
+
+		// if X-Auth-Token is passed, validate the token instead of otp
+		var vErr error
+		if at != "" {
+			jt, err := validateJwtToken(at)
+			vErr = err
+
+			if jt != nil {
+				email = jt.Username
+				r = r.WithContext(context.WithValue(r.Context(), "jwt", jt))
+			}
+		} else {
+			// validate OTP
+			o := auth.NewPayload(path, r.Method, sourceIP, email, token, otpValidationRequired, allowDefaultPass)
+			_, vErr = t.Verify(o)
+		}
+
+		if vErr != nil {
+			http.Error(writer, vErr.Error(), http.StatusUnauthorized)
 			return
 		}
 
-		f.ServeHTTP(w, r)
+		f.ServeHTTP(writer, r)
 	})
 }

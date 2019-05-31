@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,5 +175,28 @@ func TestAuthorize(t *testing.T) {
 		resp, _ := c.Do(req)
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("logs", func(t *testing.T) {
+		// Set custom log writer to capture logs in a variable
+		s := strings.Builder{}
+		log.SetOutput(&s)
+
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/upload", bytes.NewBuffer([]byte("upload_request")))
+		assert.Nil(t, err)
+		req.Header.Set("X-Project-Name", "foo")
+		req.Header.Set("X-Forwarded-For", "1.1.1.1")
+		otp, _ := totp.GenerateCode("7VP7X6OC37YVIRVI", time.Now())
+		req.SetBasicAuth("abc@trustingsocial.com", otp)
+		c := http.Client{}
+		resp, _ := c.Do(req)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.True(t, strings.Contains(s.String(), "200"))
+		assert.True(t, strings.Contains(s.String(), "[1.1.1.1]"))
+		assert.True(t, strings.Contains(s.String(), http.MethodPost))
+		assert.True(t, strings.Contains(s.String(), "abc@trustingsocial.com"))
+		assert.True(t, strings.Contains(s.String(), "foo"))
+		assert.True(t, strings.Contains(s.String(), "/upload"))
 	})
 }
