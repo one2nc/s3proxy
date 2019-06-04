@@ -68,7 +68,7 @@ func main() {
 	}).Methods(http.MethodGet)
 
 	m.Handle("/auth", authorize(authHandler())).Methods(http.MethodPost)
-	m.Handle("/upload", uploadHandler()).Methods(http.MethodPost)
+	m.Handle("/upload", authorize(uploadHandler())).Methods(http.MethodPost)
 
 	if os.Getenv("SECURE_DOWNLOAD") != "" {
 		m.PathPrefix("/").Handler(authorize(wrapper(awss3))).Methods(http.MethodGet)
@@ -191,16 +191,15 @@ func uploadHandler() http.HandlerFunc {
 		var b bytes.Buffer
 		if _, err := r.Body.Read(b.Bytes()); err != nil {
 			http.Error(w, "error processing request", http.StatusBadRequest)
-		}
-
-		t := r.Header.Get("X-Auth-Token")
-		project := r.Header.Get("X-Project-Name")
-
-		jt, err := validateJwtToken(t)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
+
+		jt, ok := r.Context().Value("jwt").(*Token)
+		if !ok {
+			http.Error(w, "jwt token not found in handler context", http.StatusBadRequest)
+			return
+		}
+		project := r.Header.Get("X-Project-Name")
 
 		if err := r.ParseMultipartForm(1024); nil != err {
 			http.Error(w, "", http.StatusInternalServerError)
@@ -218,6 +217,7 @@ func uploadHandler() http.HandlerFunc {
 				}
 
 				key := filepath.Join(c.s3KeyPrefix, project, jt.Username, hdr.Filename)
+				log.Printf("uploading %s", key)
 				if _, err := s3Upload(svc, c.s3Bucket, key, infile); err != nil {
 					http.Error(w, fmt.Sprintf("upload-error: %+v", err), http.StatusInternalServerError)
 					return
@@ -275,20 +275,8 @@ func wrapper(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		proc := time.Now()
-		addr := r.RemoteAddr
-		if ip, found := header(r, "X-Forwarded-For"); found {
-			addr = ip
-		}
-		ioWriter := w.(io.Writer)
-		writer := &custom{Writer: ioWriter, ResponseWriter: w, status: http.StatusOK}
-		f(writer, r)
 
-		if c.accessLog {
-			log.Printf("[%s] %.3f %d %s %s",
-				addr, time.Since(proc).Seconds(),
-				writer.status, r.Method, r.URL)
-		}
+		f(w, r)
 	})
 }
 
