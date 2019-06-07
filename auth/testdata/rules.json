@@ -6,9 +6,11 @@
       },
       "GET": {
         "emails": ["xyz@trustingsocial.com"]
-      },
-      "*": {
-        "secrets": ["7VP7X6OC37YVIRVI"]
+      }
+    },
+    "shared": {
+      "POST": {
+        "emails": ["*"]
       }
     },
     "foo": {

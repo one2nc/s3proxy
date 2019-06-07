@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/pquerna/otp/totp"
 )
 
 const DEFAULT = "*"
@@ -13,7 +11,6 @@ const DEFAULT = "*"
 type Rule struct {
 	Emails         []string `json:"emails"`
 	WhitelistedIPs []string `json:"whitelisted_ips"`
-	Secrets        []string `json:"secrets"`
 }
 
 type Rules map[string]map[string]Rule
@@ -54,17 +51,23 @@ func (t *TsAuth) Verify(p *payload) (bool, error) {
 			return false, fmt.Errorf("rule is not configured for action %v", p.key)
 		}
 
-		if len(rule.WhitelistedIPs) == 0 && len(rule.Emails) == 0 && len(rule.Secrets) == 0 {
+		if len(rule.WhitelistedIPs) == 0 && len(rule.Emails) == 0 {
 			return false, errors.New("no rules specified in configuration, contact service administrator")
+		}
+
+		validateOtp := func(email, otp string) (bool, error) {
+			if !IsValid(p.email, p.otp) {
+				return false, errors.New("invalid OTP")
+			}
+
+			return true, nil
 		}
 
 		if p.sourceIP != "" {
 			for _, w := range rule.WhitelistedIPs {
 				if w == p.sourceIP {
 					if p.otpRequired {
-						if !IsValid(p.email, p.otp) {
-							return false, errors.New("invalid OTP")
-						}
+						return validateOtp(p.email, p.otp)
 					}
 					return true, nil
 				}
@@ -73,22 +76,13 @@ func (t *TsAuth) Verify(p *payload) (bool, error) {
 
 		// If email and otp is passed, check from pritunl config
 		if p.email != "" && p.otp != "" && len(rule.Emails) > 0 {
+			if len(rule.Emails) == 1 && rule.Emails[0] == DEFAULT {
+				return validateOtp(p.email, p.otp)
+			}
+
 			for _, e := range rule.Emails {
 				if e == p.email {
-					if !IsValid(p.email, p.otp) {
-						return false, errors.New("invalid OTP")
-					}
-
-					return true, nil
-				}
-			}
-		}
-
-		// If otp is passed without email, check in secrets
-		if p.email == "" && p.otp != "" && len(rule.Secrets) > 0 {
-			for _, s := range rule.Secrets {
-				if totp.Validate(p.otp, s) {
-					return true, nil
+					return validateOtp(p.email, p.otp)
 				}
 			}
 		}
