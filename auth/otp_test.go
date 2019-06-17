@@ -61,17 +61,6 @@ func TestVerify(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("pass for missing key with valid OTP", func(t *testing.T) {
-		otp, err := totp.GenerateCode("7VP7X6OC37YVIRVI", time.Now())
-
-		assert.Nil(t, err)
-
-		p := NewPayload("test", "missing", "", "", otp, true, true)
-		valid, err := x.Verify(p)
-		assert.True(t, valid)
-		assert.Nil(t, err)
-	})
-
 	t.Run("pass for missing email and otp but whitelisted IP", func(t *testing.T) {
 		p := NewPayload("foo", "missing", "1.1.1.1", "", "", false, true)
 		valid, err := x.Verify(p)
@@ -99,6 +88,15 @@ func TestVerify(t *testing.T) {
 		assert.Nil(t, err)
 
 		p := NewPayload("foo", "missing", "", "admin@trustingsocial.com", otp, true, true)
+		valid, err := x.Verify(p)
+		assert.True(t, valid)
+		assert.Nil(t, err)
+	})
+
+	t.Run("pass for shared resource with any valid email and otp", func(t *testing.T) {
+		otp, err := totp.GenerateCode("7VP7X6OC37YVIRVI", time.Now())
+		assert.Nil(t, err)
+		p := NewPayload("shared", "POST", "", "abc@trustingsocial.com", otp, true, true)
 		valid, err := x.Verify(p)
 		assert.True(t, valid)
 		assert.Nil(t, err)
