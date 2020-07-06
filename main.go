@@ -334,8 +334,8 @@ func awss3(w http.ResponseWriter, r *http.Request) {
 	body := io.Reader(obj.Body)
 
 	// NOTE: By default when no key is specified this function will return all
-	// 			 the objects present in the given bucket in XML format. Convert this
-	// 			 XML output to JSON format.
+	// the objects present in the given bucket in XML format. Convert this
+	// XML output to JSON format.
 	if c.s3KeyPrefix+path == "/" {
 		body, err = xj.Convert(body)
 		if err != nil {
